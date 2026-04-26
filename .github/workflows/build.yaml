@@ -11,7 +11,7 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest # 只跑安卓，用这个就行
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
@@ -24,14 +24,14 @@ jobs:
           submodules: recursive
 
       - name: Setup Android Signing
-        if: startsWith(matrix.platform,'android')
         run: |
-          # 如果你没配置 Secrets，这些步骤会跳过，不影响编译测试版
-          echo "${{ secrets.KEYSTORE }}" | base64 --decode > android/app/keystore.jks || true
-          echo "${{ secrets.SERVICE_JSON }}" | base64 --decode > android/app/google-services.json || true
-          echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> android/local.properties || true
-          echo "storePassword=${{ secrets.STORE_PASSWORD }}" >> android/local.properties || true
-          echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> android/local.properties || true
+          # 即使没有配置密钥，也创建空文件防止报错
+          mkdir -p android/app
+          echo "${{ secrets.KEYSTORE }}" | base64 --decode > android/app/keystore.jks || touch android/app/keystore.jks
+          echo "${{ secrets.SERVICE_JSON }}" | base64 --decode > android/app/google-services.json || touch android/app/google-services.json
+          echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> android/local.properties || echo "keyAlias=test" >> android/local.properties
+          echo "storePassword=${{ secrets.STORE_PASSWORD }}" >> android/local.properties || echo "storePassword=test" >> android/local.properties
+          echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> android/local.properties || echo "keyPassword=test" >> android/local.properties
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -45,21 +45,24 @@ jobs:
           flutter-version: 3.27.0
           cache: true
 
-      - name: 修复依赖和包名
+      - name: 彻底修复说明书和包名
         run: |
-          # 1. 精准切除坏掉的 yaml_writer 块并替换 (从 yaml_writer: 开始到 url: 结束)
-          # 这个命令会把那 3 行直接变成 1 行，解决刚才的格式错误
-          sed -i '/yaml_writer:/,/url:.*yaml_writer/c\  yaml_writer: ^2.0.0' pubspec.yaml
+          # 1. 强力清除坏掉的 yaml_writer 依赖块（包括多余的 ref: master）
+          # 我们先删除包含 yaml_writer 及其后 3 行的所有内容
+          sed -i '/yaml_writer:/,+3d' pubspec.yaml
           
-          # 2. 修改 Android 包名 (com.antutu.ABenchMark)
+          # 2. 在 dependencies 关键词下面重新插入一行干净的依赖
+          sed -i '/dependencies:/a \  yaml_writer: ^2.0.0' pubspec.yaml
+          
+          # 3. 全局修改包名为 com.antutu.ABenchMark
           find . -name "build.gradle" -exec sed -i 's/applicationId ".*"/applicationId "com.antutu.ABenchMark"/g' {} +
           find . -name "AndroidManifest.xml" -exec sed -i 's/package=".*"/package="com.antutu.ABenchMark"/g' {} +
           
-          # 3. 修改代码里的包名声明 (Kotlin/Java)
+          # 4. 修改代码中的包名声明
           find . -name "MainActivity.kt" -exec sed -i 's/package .*/package com.antutu.ABenchMark/g' {} +
           find . -name "MainActivity.java" -exec sed -i 's/package .*/package com.antutu.ABenchMark/g' {} +
           
-          echo "✅ 手术成功，格式已修复！"
+          echo "✅ 坏掉的零件已剔除，新包名已植入！"
 
       - name: Get Flutter Dependency
         run: |
@@ -68,9 +71,13 @@ jobs:
       - name: Setup
         run: dart setup.dart ${{ matrix.platform }}
 
+      - name: Build APK
+        run: |
+          flutter build apk --release --target-platform android-arm64 --split-per-abi
+
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: artifact-android
-          path: ./dist
+          path: build/app/outputs/flutter-apk/*.apk
           overwrite: true
