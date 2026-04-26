@@ -84,6 +84,13 @@ jobs:
           flutter --version
           flutter pub get
 
+      - name: 自动修改包名为安兔兔
+        if: startsWith(matrix.platform,'android')
+        run: |
+          sed -i 's/applicationId ".*"/applicationId "com.antutu.ABenchMark"/g' android/app/build.gradle
+          find android/app/src -name "AndroidManifest.xml" -exec sed -i 's/package=".*"/package="com.antutu.ABenchMark"/g' {} +
+          find android/app/src -name "MainActivity.kt" -exec sed -i 's/package .*/package com.antutu.ABenchMark/g' {} +
+
       - name: Setup
         run: dart setup.dart ${{ matrix.platform }} ${{ matrix.arch && format('--arch {0}', matrix.arch) }} ${{ env.IS_STABLE == 'true' && '--env stable' || '' }}
 
@@ -245,4 +252,3 @@ jobs:
           target-branch: main
           commit-message: Update from ${{ github.ref_name }}
           target-directory: /tmp/
-
