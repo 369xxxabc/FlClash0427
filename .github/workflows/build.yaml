@@ -27,11 +27,11 @@ jobs:
       - name: Setup Android Signing
         if: startsWith(matrix.platform,'android')
         run: |
-          echo "${{ secrets.KEYSTORE }}" | base64 --decode > android/app/keystore.jks
-          echo "${{ secrets.SERVICE_JSON }}" | base64 --decode > android/app/google-services.json
-          echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> android/local.properties
-          echo "storePassword=${{ secrets.STORE_PASSWORD }}" >> android/local.properties
-          echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> android/local.properties
+          echo "${{ secrets.KEYSTORE }}" | base64 --decode > android/app/keystore.jks || true
+          echo "${{ secrets.SERVICE_JSON }}" | base64 --decode > android/app/google-services.json || true
+          echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> android/local.properties || true
+          echo "storePassword=${{ secrets.STORE_PASSWORD }}" >> android/local.properties || true
+          echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> android/local.properties || true
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -44,22 +44,25 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-          flutter-version: 3.27.0 # 稍微降低一点点版本，提高稳定性
+          flutter-version: 3.27.0
           cache: true
 
-      - name: 修复坏掉的依赖包
+      - name: 修复依赖包和自动改包名
         run: |
-          # 这一步是把那个坏掉的 git 链接换成官方标准的零件包
-          # 我们用魔法指令 sed 直接修改说明书
-          sed -i '/yaml_writer:/,+3c\  yaml_writer: ^2.0.0' pubspec.yaml
-          echo "已修复 yaml_writer 依赖"
-
-      - name: 自动修改包名为安兔兔
-        if: startsWith(matrix.platform,'android')
-        run: |
-          sed -i 's/applicationId ".*"/applicationId "com.antutu.ABenchMark"/g' android/app/build.gradle
-          find android/app/src -name "AndroidManifest.xml" -exec sed -i 's/package=".*"/package="com.antutu.ABenchMark"/g' {} +
-          find android/app/src -name "MainActivity.kt" -exec sed -i 's/package .*/package com.antutu.ABenchMark/g' {} +
+          # 1. 修复那个坏掉的依赖包链接
+          find . -name "pubspec.yaml" -exec sed -i 's|https://github.com/chen08209/yaml_writer.*|yaml_writer: ^2.0.0|g' {} +
+          
+          # 2. 全量搜索并修改 build.gradle 里的 applicationId
+          find . -name "build.gradle" -exec sed -i 's/applicationId ".*"/applicationId "com.antutu.ABenchMark"/g' {} +
+          
+          # 3. 全量搜索并修改 AndroidManifest 里的 package
+          find . -name "AndroidManifest.xml" -exec sed -i 's/package=".*"/package="com.antutu.ABenchMark"/g' {} +
+          
+          # 4. 全量搜索并修改 Kotlin/Java 代码里的包名声明
+          find . -name "MainActivity.kt" -exec sed -i 's/package .*/package com.antutu.ABenchMark/g' {} +
+          find . -name "MainActivity.java" -exec sed -i 's/package .*/package com.antutu.ABenchMark/g' {} +
+          
+          echo "✅ 依赖修复与包名修改全部完成！"
 
       - name: Get Flutter Dependency
         run: |
