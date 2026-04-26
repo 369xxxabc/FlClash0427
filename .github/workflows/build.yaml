@@ -25,13 +25,12 @@ jobs:
 
       - name: Setup Android Signing
         run: |
-          # 即使没有配置密钥，也创建空文件防止报错
           mkdir -p android/app
+          # 即使没有密钥也生成占位文件，保证流程不中断
           echo "${{ secrets.KEYSTORE }}" | base64 --decode > android/app/keystore.jks || touch android/app/keystore.jks
-          echo "${{ secrets.SERVICE_JSON }}" | base64 --decode > android/app/google-services.json || touch android/app/google-services.json
-          echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> android/local.properties || echo "keyAlias=test" >> android/local.properties
-          echo "storePassword=${{ secrets.STORE_PASSWORD }}" >> android/local.properties || echo "storePassword=test" >> android/local.properties
-          echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> android/local.properties || echo "keyPassword=test" >> android/local.properties
+          echo "keyAlias=test" > android/local.properties
+          echo "storePassword=test" >> android/local.properties
+          echo "keyPassword=test" >> android/local.properties
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -42,42 +41,55 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-          flutter-version: 3.27.0
+          # 调回最新稳定版，确保 Dart 版本足够高
+          flutter-version: 3.35.7 
           cache: true
 
-      - name: 彻底修复说明书和包名
+      - name: 彻底修复说明书 (Python 核弹版)
         run: |
-          # 1. 强力清除坏掉的 yaml_writer 依赖块（包括多余的 ref: master）
-          # 我们先删除包含 yaml_writer 及其后 3 行的所有内容
-          sed -i '/yaml_writer:/,+3d' pubspec.yaml
-          
-          # 2. 在 dependencies 关键词下面重新插入一行干净的依赖
-          sed -i '/dependencies:/a \  yaml_writer: ^2.0.0' pubspec.yaml
-          
-          # 3. 全局修改包名为 com.antutu.ABenchMark
+          # 使用 Python 精准剔除坏掉的 yaml_writer 依赖，不管它有几行
+          python3 -c "
+          import sys
+          with open('pubspec.yaml', 'r') as f:
+              lines = f.readlines()
+          with open('pubspec.yaml', 'w') as f:
+              skip = False
+              for line in lines:
+                  if 'yaml_writer:' in line:
+                      f.write('  yaml_writer: ^2.0.0\n')
+                      skip = True # 开始跳过后面坏掉的 git 块
+                  elif skip and ('git:' in line or 'url:' in line or 'ref:' in line or '    ' in line):
+                      continue # 继续跳过缩进的内容
+                  else:
+                      skip = False
+                      f.write(line)
+          "
+          echo "✅ pubspec.yaml 已通过 Python 脚本完美修复！"
+
+      - name: 全球搜索并替换包名
+        run: |
+          # 修改包名为安兔兔
           find . -name "build.gradle" -exec sed -i 's/applicationId ".*"/applicationId "com.antutu.ABenchMark"/g' {} +
           find . -name "AndroidManifest.xml" -exec sed -i 's/package=".*"/package="com.antutu.ABenchMark"/g' {} +
-          
-          # 4. 修改代码中的包名声明
           find . -name "MainActivity.kt" -exec sed -i 's/package .*/package com.antutu.ABenchMark/g' {} +
           find . -name "MainActivity.java" -exec sed -i 's/package .*/package com.antutu.ABenchMark/g' {} +
-          
-          echo "✅ 坏掉的零件已剔除，新包名已植入！"
+          echo "✅ 包名已替换为 com.antutu.ABenchMark"
 
       - name: Get Flutter Dependency
         run: |
           flutter pub get
 
-      - name: Setup
-        run: dart setup.dart ${{ matrix.platform }}
+      - name: Setup Project
+        run: dart setup.dart android
 
-      - name: Build APK
+      - name: Build APK (Release)
         run: |
-          flutter build apk --release --target-platform android-arm64 --split-per-abi
+          # 编译 arm64 版本的 APK
+          flutter build apk --release --target-platform android-arm64
 
-      - name: Upload
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: artifact-android
-          path: build/app/outputs/flutter-apk/*.apk
+          name: FLClash-AnTuTu-Edition
+          path: build/app/outputs/flutter-apk/app-release.apk
           overwrite: true
