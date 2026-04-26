@@ -4,19 +4,18 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch: # 手动运行开关
+  workflow_dispatch: # 手动运行按钮
 
 env:
   IS_STABLE: ${{ !contains(github.ref, '-') }}
 
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest # 只跑安卓，用这个就行
     strategy:
       matrix:
         include:
           - platform: android
-            os: ubuntu-latest
 
     steps:
       - name: Checkout
@@ -27,6 +26,7 @@ jobs:
       - name: Setup Android Signing
         if: startsWith(matrix.platform,'android')
         run: |
+          # 如果你没配置 Secrets，这些步骤会跳过，不影响编译测试版
           echo "${{ secrets.KEYSTORE }}" | base64 --decode > android/app/keystore.jks || true
           echo "${{ secrets.SERVICE_JSON }}" | base64 --decode > android/app/google-services.json || true
           echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> android/local.properties || true
@@ -37,8 +37,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24.0'
-          cache-dependency-path: |
-            core/go.sum
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -47,34 +45,32 @@ jobs:
           flutter-version: 3.27.0
           cache: true
 
-      - name: 修复依赖包和自动改包名
+      - name: 修复依赖和包名
         run: |
-          # 1. 修复那个坏掉的依赖包链接
-          find . -name "pubspec.yaml" -exec sed -i 's|https://github.com/chen08209/yaml_writer.*|yaml_writer: ^2.0.0|g' {} +
+          # 1. 精准切除坏掉的 yaml_writer 块并替换 (从 yaml_writer: 开始到 url: 结束)
+          # 这个命令会把那 3 行直接变成 1 行，解决刚才的格式错误
+          sed -i '/yaml_writer:/,/url:.*yaml_writer/c\  yaml_writer: ^2.0.0' pubspec.yaml
           
-          # 2. 全量搜索并修改 build.gradle 里的 applicationId
+          # 2. 修改 Android 包名 (com.antutu.ABenchMark)
           find . -name "build.gradle" -exec sed -i 's/applicationId ".*"/applicationId "com.antutu.ABenchMark"/g' {} +
-          
-          # 3. 全量搜索并修改 AndroidManifest 里的 package
           find . -name "AndroidManifest.xml" -exec sed -i 's/package=".*"/package="com.antutu.ABenchMark"/g' {} +
           
-          # 4. 全量搜索并修改 Kotlin/Java 代码里的包名声明
+          # 3. 修改代码里的包名声明 (Kotlin/Java)
           find . -name "MainActivity.kt" -exec sed -i 's/package .*/package com.antutu.ABenchMark/g' {} +
           find . -name "MainActivity.java" -exec sed -i 's/package .*/package com.antutu.ABenchMark/g' {} +
           
-          echo "✅ 依赖修复与包名修改全部完成！"
+          echo "✅ 手术成功，格式已修复！"
 
       - name: Get Flutter Dependency
         run: |
-          flutter --version
           flutter pub get
 
       - name: Setup
-        run: dart setup.dart ${{ matrix.platform }} ${{ matrix.arch && format('--arch {0}', matrix.arch) }} ${{ env.IS_STABLE == 'true' && '--env stable' || '' }}
+        run: dart setup.dart ${{ matrix.platform }}
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: artifact-${{ matrix.platform }}${{ matrix.arch && format('-{0}', matrix.arch) }}
+          name: artifact-android
           path: ./dist
           overwrite: true
