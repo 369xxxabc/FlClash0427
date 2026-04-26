@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch: # 手动运行开关
+
 env:
   IS_STABLE: ${{ !contains(github.ref, '-') }}
 
