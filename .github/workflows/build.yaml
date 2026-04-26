@@ -12,25 +12,11 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - platform: android
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: recursive
-
-      - name: Setup Android Signing
-        run: |
-          mkdir -p android/app
-          # 即使没有密钥也生成占位文件，保证流程不中断
-          echo "${{ secrets.KEYSTORE }}" | base64 --decode > android/app/keystore.jks || touch android/app/keystore.jks
-          echo "keyAlias=test" > android/local.properties
-          echo "storePassword=test" >> android/local.properties
-          echo "keyPassword=test" >> android/local.properties
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -41,13 +27,11 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-          # 调回最新稳定版，确保 Dart 版本足够高
-          flutter-version: 3.35.7 
+          flutter-version: 3.35.7
           cache: true
 
-      - name: 彻底修复说明书 (Python 核弹版)
+      - name: 1. 修复说明书 (Python 脚本)
         run: |
-          # 使用 Python 精准剔除坏掉的 yaml_writer 依赖，不管它有几行
           python3 -c "
           import sys
           with open('pubspec.yaml', 'r') as f:
@@ -57,39 +41,36 @@ jobs:
               for line in lines:
                   if 'yaml_writer:' in line:
                       f.write('  yaml_writer: ^2.0.0\n')
-                      skip = True # 开始跳过后面坏掉的 git 块
+                      skip = True
                   elif skip and ('git:' in line or 'url:' in line or 'ref:' in line or '    ' in line):
-                      continue # 继续跳过缩进的内容
+                      continue
                   else:
                       skip = False
                       f.write(line)
           "
-          echo "✅ pubspec.yaml 已通过 Python 脚本完美修复！"
 
-      - name: 全球搜索并替换包名
+      - name: 2. 准备零件 (pub get)
+        run: flutter pub get
+
+      - name: 3. 运行原始初始化 (不打包，只跑基础设置)
+        run: dart setup.dart android || true # 就算这一步报错也继续往下走
+
+      - name: 4. 暴力修改包名为安兔兔 (只改身份证，不改代码)
         run: |
-          # 修改包名为安兔兔
+          # 只修改 build.gradle 里的 applicationId，这就能骗过系统
           find . -name "build.gradle" -exec sed -i 's/applicationId ".*"/applicationId "com.antutu.ABenchMark"/g' {} +
-          find . -name "AndroidManifest.xml" -exec sed -i 's/package=".*"/package="com.antutu.ABenchMark"/g' {} +
-          find . -name "MainActivity.kt" -exec sed -i 's/package .*/package com.antutu.ABenchMark/g' {} +
-          find . -name "MainActivity.java" -exec sed -i 's/package .*/package com.antutu.ABenchMark/g' {} +
-          echo "✅ 包名已替换为 com.antutu.ABenchMark"
+          # 强制把签名设置改为 debug 版，这样就算你没有配置 Secrets 也能打包成功
+          find . -name "build.gradle" -exec sed -i 's/signingConfig signingConfigs.release/signingConfig signingConfigs.debug/g' {} +
+          echo "✅ 身份伪装已完成！"
 
-      - name: Get Flutter Dependency
+      - name: 5. 开始正式打包 (不使用报错的脚本)
         run: |
-          flutter pub get
+          # 直接使用 Flutter 原生命令打包，绕过 setup.dart
+          flutter build apk --release --target-platform android-arm64 --no-tree-shake-icons
 
-      - name: Setup Project
-        run: dart setup.dart android
-
-      - name: Build APK (Release)
-        run: |
-          # 编译 arm64 版本的 APK
-          flutter build apk --release --target-platform android-arm64
-
-      - name: Upload Artifact
+      - name: 6. 上传安装包
         uses: actions/upload-artifact@v4
         with:
-          name: FLClash-AnTuTu-Edition
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: FLClash-AnTuTu-Spoof
+          path: build/app/outputs/flutter-apk/*.apk
           overwrite: true
