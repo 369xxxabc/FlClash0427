@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: 'Branch or tag to build'
+        description: 'Branch or tag to build (default: main)'
         required: false
         default: 'main'
 
@@ -22,18 +22,19 @@ jobs:
           ref: ${{ github.event.inputs.ref || 'main' }}
           submodules: recursive
 
-      # ==================== Flutter 环境（必须先设置） ====================
+      # ==================== 1. 先设置 Flutter（必须第一步） ====================
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-          flutter-version: '3.35.7'   # 与你之前使用的版本一致
+          flutter-version: '3.35.7'
           cache: true
 
-      - name: Flutter Pub Get (重要！修复依赖错误)
+      # ==================== 2. Flutter Pub Get（修复依赖错误的关键） ====================
+      - name: Flutter Pub Get
         run: flutter pub get
 
-      # ==================== 修改包名（放在 pub get 之后） ====================
+      # ==================== 3. 修改包名（必须在 pub get 之后） ====================
       - name: Change package name to ${{ env.PACKAGE_NAME }}
         run: |
           echo "🔄 Changing package name to ${{ env.PACKAGE_NAME }}"
@@ -42,29 +43,29 @@ jobs:
           find android -name "build.gradle*" -exec sed -i 's/applicationId ["'\''][^"'\'']*["'\'']/applicationId "${{ env.PACKAGE_NAME }}"/g' {} + || true
           find android -name "build.gradle*" -exec sed -i 's/applicationId = ["'\''][^"'\'']*["'\'']/applicationId = "${{ env.PACKAGE_NAME }}"/g' {} + || true
 
-          # 修改 AndroidManifest.xml
+          # 修改 Manifest package
           sed -i 's/package="[^"]*"/package="${{ env.PACKAGE_NAME }}"/' android/app/src/main/AndroidManifest.xml || true
 
-          # 全局替换 com.follow.clash（关键，防止服务冲突）
+          # 全局替换 com.follow.clash（非常重要）
           grep -rl "com\.follow\.clash" android/ 2>/dev/null | xargs sed -i "s|com\.follow\.clash|${{ env.PACKAGE_NAME }}|g" || true
 
-          # 修改 App 显示名称
+          # 修改 App 名称
           sed -i 's/<string name="app_name">[^<]*<\/string>/<string name="app_name">AnTuTu Benchmark<\/string>/' \
             android/app/src/main/res/values/strings.xml || true
 
-          echo "✅ Package name changed."
+          echo "✅ Package name changed successfully."
 
-      # ==================== Go 环境 ====================
+      # ==================== 4. Go 环境 ====================
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.23'
 
-      # ==================== 执行 Android 构建 ====================
-      - name: Build Android with setup.dart
+      # ==================== 5. 执行构建 ====================
+      - name: Build Android (dart setup.dart android)
         run: dart setup.dart android
 
-      # ==================== 上传 APK ====================
+      # ==================== 6. 上传 APK ====================
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -75,9 +76,9 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-      - name: List built files
+      - name: Show built files
         if: always()
         run: |
-          echo "=== Built APK files ==="
+          echo "=== Built files ==="
           ls -lh ./dist/ 2>/dev/null || true
           ls -lh ./build/app/outputs/flutter-apk/ 2>/dev/null || true
