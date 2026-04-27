@@ -1,0 +1,62 @@
+name: Full Auto Android Build
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Auto-Fix Dependencies & Package Name
+        run: |
+          echo "1. 正在修复依赖项报错..."
+          # 针对 yaml_writer 报错：将其从不稳定的 Git 引用改为使用 pub.dev 官方版本
+          # 这会删除 pubspec.yaml 中关于 yaml_writer 的 git 引用段落，并添加标准版本号
+          sed -i '/yaml_writer:/,+3d' pubspec.yaml
+          sed -i '/dependencies:/a \  yaml_writer: ^2.0.0' pubspec.yaml
+          
+          echo "2. 正在全量替换包名..."
+          OLD_ID="com.example.flclash"
+          NEW_ID="com.antutu.ABenchMark"
+          
+          # 替换 build.gradle 里的 ID
+          find android -name "build.gradle" -exec sed -i "s/applicationId \"$OLD_ID\"/applicationId \"$NEW_ID\"/g" {} +
+          # 替换清单文件里的 package
+          find android -name "AndroidManifest.xml" -exec sed -i "s/package=\"$OLD_ID\"/package=\"$NEW_ID\"/g" {} +
+          # 替换 Kotlin/Java 源码中的 package 声明
+          grep -rl "$OLD_ID" . | xargs sed -i "s/$OLD_ID/$NEW_ID/g" || true
+          
+          # 特殊处理：有些 Flutter 项目在 namespace 里也定义了 ID
+          find android -name "build.gradle" -exec sed -i "s/namespace \"$OLD_ID\"/namespace \"$NEW_ID\"/g" {} +
+
+          echo "自动处理完成。"
+
+      - name: Get Dependencies
+        run: flutter pub get
+
+      - name: Build APK
+        run: flutter build apk --release --tree-shake-icons
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FlClash-Antutu-Modified
+          path: build/app/outputs/flutter-apk/app-release.apk
