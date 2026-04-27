@@ -1,4 +1,4 @@
-name: FlClash Android Fixed Build
+name: FlClash Android Final Fix
 
 on:
   push:
@@ -14,7 +14,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: 'recursive'
-          fetch-depth: 0
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -25,42 +24,46 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
+          # 固定使用一个相对兼容的版本，或者保持 stable
           channel: 'stable'
           cache: true
 
-      - name: Package Name & Dependency Patch
+      - name: Patch Dependencies & Package Name
         run: |
-          echo "1. 正在修改包名为 com.antutu.ABenchMark..."
+          echo "1. 修复版本冲突 (material_color_utilities)..."
+          # 直接强制修改 pubspec.yaml，将不兼容的版本号改为符合 SDK 要求的 0.13.0
+          sed -i 's/material_color_utilities: ^0.11.1/material_color_utilities: ^0.13.0/g' pubspec.yaml
+          
+          echo "2. 修复 yaml_writer 依赖..."
+          # 针对之前那个报错的 git 依赖，直接强制换成 pub 官方版
+          sed -i '/yaml_writer:/,+3d' pubspec.yaml
+          sed -i '/dependencies:/a \  yaml_writer: ^2.0.0' pubspec.yaml
+
+          echo "3. 正在修改包名为 com.antutu.ABenchMark..."
           OLD_ID="com.example.flclash"
           NEW_ID="com.antutu.ABenchMark"
           
-          # 使用更安全的替换方式，避免破坏 YAML 结构
-          # 仅替换 Android 相关配置，不碰 pubspec.yaml 的依赖路径
+          # 修改 Android 构建配置
           find android -name "build.gradle" -exec sed -i "s/applicationId \"$OLD_ID\"/applicationId \"$NEW_ID\"/g" {} +
           find android -name "build.gradle" -exec sed -i "s/namespace \"$OLD_ID\"/namespace \"$NEW_ID\"/g" {} +
           find android -name "AndroidManifest.xml" -exec sed -i "s/package=\"$OLD_ID\"/package=\"$NEW_ID\"/g" {} +
           
-          # 2. 修复源码中的包名引用
-          # 排除 plugins 目录以免破坏本地插件的内部引用
+          # 修改源码中的包名引用
           find . -type f \( -name "*.kt" -o -name "*.java" -o -name "*.dart" \) -not -path "*/.pub-cache/*" | xargs sed -i "s/$OLD_ID/$NEW_ID/g" || true
 
-          echo "3. 修复特定的依赖问题..."
-          # 针对之前报错的 yaml_writer 这种 git 依赖，尝试清除锁文件强制更新
+          echo "4. 清理旧缓存..."
           rm -f pubspec.lock
 
       - name: Get Dependencies
-        run: |
-          # 如果 pub get 还是失败，可能是某些本地插件确实没拉下来
-          # 我们尝试用 --offline 之外的最强力拉取
-          flutter pub get
+        run: flutter pub get
 
       - name: Build APK
         run: |
-          # 强制生成 release 版 APK
-          flutter build apk --release --no-tree-shake-icons --build-number=1 --build-name=1.0.0
+          # 编译 APK，加入 --no-tree-shake-icons 增加稳定性
+          flutter build apk --release --no-tree-shake-icons
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FlClash-Antutu-Standard
+          name: FlClash-Antutu-Success
           path: build/app/outputs/flutter-apk/app-release.apk
