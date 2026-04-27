@@ -1,0 +1,60 @@
+name: Build Android App (Custom Package)
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  workflow_dispatch: # 支持手动触发
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Modify Package Name
+        run: |
+          # 定义原始包名和目标包名
+          OLD_ID="com.example.flclash" # 请根据项目实际定义的包名核对
+          NEW_ID="com.antutu.ABenchMark"
+          
+          echo "正在将包名从 $OLD_ID 修改为 $NEW_ID..."
+
+          # 1. 替换 build.gradle 中的 applicationId
+          find android -name "build.gradle" -exec sed -i "s/applicationId \"$OLD_ID\"/applicationId \"$NEW_ID\"/g" {} +
+          
+          # 2. 替换 AndroidManifest.xml 中的 package (适配旧版 Flutter 或特定配置)
+          find android -name "AndroidManifest.xml" -exec sed -i "s/package=\"$OLD_ID\"/package=\"$NEW_ID\"/g" {} +
+
+          # 3. 替换全量代码中的包名引用 (Java/Kotlin/C++)
+          grep -rl "$OLD_ID" . | xargs sed -i "s/$OLD_ID/$NEW_ID/g" || true
+          
+          echo "包名修改完成。"
+
+      - name: Install Dependencies
+        run: flutter pub get
+
+      - name: Build APK
+        run: flutter build apk --release
+
+      - name: Build App Bundle (Optional)
+        run: flutter build appbundle --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: FlClash-Antutu-Version
+          path: build/app/outputs/flutter-apk/app-release.apk
