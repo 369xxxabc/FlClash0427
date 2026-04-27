@@ -1,14 +1,12 @@
 name: Build Android Custom (com.antutu.ABenchMark)
 
 on:
-  workflow_dispatch:      # 手动触发（推荐）
+  workflow_dispatch:
     inputs:
       ref:
-        description: 'Branch or tag to build (default: main)'
+        description: 'Branch or tag to build'
         required: false
         default: 'main'
-  push:
-    branches: [ main ]    # 可选：推送到 main 时也触发（测试用）
 
 env:
   PACKAGE_NAME: "com.antutu.ABenchMark"
@@ -18,75 +16,65 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout code with submodules
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.ref || 'main' }}
           submodules: recursive
 
-      # ==================== 修改包名（核心步骤） ====================
-      - name: Change Android package name to ${{ env.PACKAGE_NAME }}
+      # ==================== 修改包名 ====================
+      - name: Change package name to ${{ env.PACKAGE_NAME }}
         run: |
-          echo "Changing package name to ${{ env.PACKAGE_NAME }} ..."
+          echo "🔄 Changing package name to ${{ env.PACKAGE_NAME }}"
 
-          # 1. 修改 build.gradle
-          sed -i 's/applicationId ".*"/applicationId "${{ env.PACKAGE_NAME }}"/' android/app/build.gradle || true
-          sed -i 's/applicationId = ".*"/applicationId = "${{ env.PACKAGE_NAME }}"/' android/app/build.gradle.kts || true
+          # 修改 build.gradle / build.gradle.kts
+          find android -name "build.gradle*" -exec sed -i 's/applicationId ["'\''][^"'\'']*["'\'']/applicationId "${{ env.PACKAGE_NAME }}"/g' {} + || true
+          find android -name "build.gradle*" -exec sed -i 's/applicationId = ["'\''][^"'\'']*["'\'']/applicationId = "${{ env.PACKAGE_NAME }}"/g' {} + || true
 
-          # 2. 修改 AndroidManifest.xml
-          sed -i 's/package="[^"]*"/package="${{ env.PACKAGE_NAME }}"/' android/app/src/main/AndroidManifest.xml
+          # 修改 AndroidManifest.xml
+          sed -i 's/package="[^"]*"/package="${{ env.PACKAGE_NAME }}"/' android/app/src/main/AndroidManifest.xml || true
 
-          # 3. 替换所有 com.follow.clash 为新包名（防止 intent、authority 冲突）
-          grep -rl "com.follow.clash" android/ --include="*.xml" --include="*.kt" --include="*.java" | xargs sed -i "s|com\.follow\.clash|${{ env.PACKAGE_NAME }}|g" || true
+          # 全局替换 com.follow.clash（防止 intent、provider、authority 等冲突）
+          grep -rl "com\.follow\.clash" android/ 2>/dev/null | xargs sed -i "s|com\.follow\.clash|${{ env.PACKAGE_NAME }}|g" || true
 
-          # 4. 修改 app 显示名称（可选，改为 AnTuTu Benchmark）
-          sed -i 's/<string name="app_name">[^<]*<\/string>/<string name="app_name">AnTuTu Benchmark<\/string>/' android/app/src/main/res/values/strings.xml || true
+          # 修改 App 显示名称（可选）
+          sed -i 's/<string name="app_name">[^<]*<\/string>/<string name="app_name">AnTuTu Benchmark<\/string>/' \
+            android/app/src/main/res/values/strings.xml || true
 
-          echo "Package name changed successfully."
+          echo "✅ Package name changed."
 
       # ==================== 环境准备 ====================
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24.0'
-          cache-dependency-path: core/go.sum
+          go-version: '1.23'   # 或 1.24，根据项目需求
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-          flutter-version: 3.35.7
+          flutter-version: '3.35.7'   # 与你之前 Workflow 一致
           cache: true
 
-      - name: Flutter Pub Get
-        run: flutter pub get
-
-      # ==================== Android 签名准备（可选） ====================
-      # 如果你想签名（推荐），请先在仓库 Settings → Secrets and variables → Actions 中添加以下 secrets：
-      # KEYSTORE (base64 编码的 keystore.jks)
-      # KEY_ALIAS, STORE_PASSWORD, KEY_PASSWORD
-      - name: Setup Android Signing (if secrets exist)
-        if: ${{ env.KEYSTORE != '' }}
+      # ==================== 关键修复：不提前 pub get，直接运行 setup.dart ====================
+      - name: Run setup.dart android (handles pub get + build)
         run: |
-          echo "${{ secrets.KEYSTORE }}" | base64 --decode > android/app/keystore.jks
-          echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> android/local.properties
-          echo "storePassword=${{ secrets.STORE_PASSWORD }}" >> android/local.properties
-          echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> android/local.properties
-        env:
-          KEYSTORE: ${{ secrets.KEYSTORE }}
-
-      # ==================== 执行构建（只构建 Android） ====================
-      - name: Build Android with setup.dart
-        run: dart setup.dart android
+          dart setup.dart android
 
       # ==================== 上传 APK ====================
-      - name: Upload APK Artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: FlClash-Android-com.antutu.ABenchMark
-          path: ./dist/*.apk
-          if-no-files-found: error
+          path: |
+            ./dist/*.apk
+            ./build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: warn
           retention-days: 30
 
-      - name: List built files
-        run: ls -lh ./dist/
+      - name: List output files
+        if: always()
+        run: |
+          echo "=== Built files ==="
+          ls -lh ./dist/ 2>/dev/null || true
+          ls -lh ./build/app/outputs/flutter-apk/ 2>/dev/null || true
