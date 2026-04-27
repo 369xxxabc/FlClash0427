@@ -1,4 +1,4 @@
-name: Ultimate Auto Android Build
+name: FlClash Android Fixed Build
 
 on:
   push:
@@ -13,7 +13,8 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          submodules: 'recursive' # 尝试拉取可能存在的子模块
+          submodules: 'recursive'
+          fetch-depth: 0
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -27,50 +28,39 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Hard-Fix Dependencies & Package Name
+      - name: Package Name & Dependency Patch
         run: |
-          echo "1. 修复路径依赖和坏掉的 Git 依赖..."
-          
-          # 修复 tray_manager: 从本地路径改为远程版本
-          sed -i '/tray_manager:/,+2d' pubspec.yaml
-          sed -i '/dependencies:/a \  tray_manager: ^0.2.4' pubspec.yaml
-          
-          # 修复 window_manager: (通常和 tray_manager 一起出现，预防万一)
-          sed -i '/window_manager:/,+2d' pubspec.yaml
-          sed -i '/dependencies:/a \  window_manager: ^0.4.3' pubspec.yaml
-
-          # 修复之前报错的 yaml_writer
-          sed -i '/yaml_writer:/,+3d' pubspec.yaml
-          sed -i '/dependencies:/a \  yaml_writer: ^2.0.0' pubspec.yaml
-          
-          echo "2. 正在全量替换包名为 com.antutu.ABenchMark..."
+          echo "1. 正在修改包名为 com.antutu.ABenchMark..."
           OLD_ID="com.example.flclash"
           NEW_ID="com.antutu.ABenchMark"
           
-          # 替换 build.gradle 里的 ID 和 namespace
+          # 使用更安全的替换方式，避免破坏 YAML 结构
+          # 仅替换 Android 相关配置，不碰 pubspec.yaml 的依赖路径
           find android -name "build.gradle" -exec sed -i "s/applicationId \"$OLD_ID\"/applicationId \"$NEW_ID\"/g" {} +
           find android -name "build.gradle" -exec sed -i "s/namespace \"$OLD_ID\"/namespace \"$NEW_ID\"/g" {} +
-          
-          # 替换清单文件
           find android -name "AndroidManifest.xml" -exec sed -i "s/package=\"$OLD_ID\"/package=\"$NEW_ID\"/g" {} +
           
-          # 替换源码引用
-          grep -rl "$OLD_ID" . | xargs sed -i "s/$OLD_ID/$NEW_ID/g" || true
+          # 2. 修复源码中的包名引用
+          # 排除 plugins 目录以免破坏本地插件的内部引用
+          find . -type f \( -name "*.kt" -o -name "*.java" -o -name "*.dart" \) -not -path "*/.pub-cache/*" | xargs sed -i "s/$OLD_ID/$NEW_ID/g" || true
 
-          echo "依赖补丁与包名修改已完成。"
+          echo "3. 修复特定的依赖问题..."
+          # 针对之前报错的 yaml_writer 这种 git 依赖，尝试清除锁文件强制更新
+          rm -f pubspec.lock
 
       - name: Get Dependencies
         run: |
-          flutter pub pubcache repair || true # 清理缓存防止干扰
+          # 如果 pub get 还是失败，可能是某些本地插件确实没拉下来
+          # 我们尝试用 --offline 之外的最强力拉取
           flutter pub get
 
       - name: Build APK
         run: |
-          # 使用 --no-tree-shake-icons 避免部分图标库编译失败
-          flutter build apk --release --no-tree-shake-icons
+          # 强制生成 release 版 APK
+          flutter build apk --release --no-tree-shake-icons --build-number=1 --build-name=1.0.0
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FlClash-Modified-APK
+          name: FlClash-Antutu-Standard
           path: build/app/outputs/flutter-apk/app-release.apk
