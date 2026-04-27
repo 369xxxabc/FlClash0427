@@ -4,7 +4,7 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch: # 手动运行按钮
+  workflow_dispatch: # 手动按钮
 
 env:
   IS_STABLE: ${{ !contains(github.ref, '-') }}
@@ -55,31 +55,31 @@ jobs:
       - name: 3. 基础设置 (setup.dart)
         run: dart setup.dart android || true
 
-      - name: 4. 核弹级包名全局替换 (针对 com.follow.clash.dev)
+      - name: 4. 地毯式包名强改
         run: |
-          # 核心：地毯式搜索。针对你截图显示的这个具体包名，全项目搜索并替换
-          # 无论是 .gradle, .xml, .kt, .dart 还是配置文件，见一个改一个
+          # 针对你截图里的旧包名，进行全项目无死角替换
+          # 第一轮：替换所有出现的字符串
           grep -rl "com.follow.clash.dev" . | xargs sed -i 's/com.follow.clash.dev/com.antutu.ABenchMark/g' || true
           grep -rl "com.follow.clash" . | xargs sed -i 's/com.follow.clash/com.antutu.ABenchMark/g' || true
           
-          # 针对 build.gradle 里的关键字段再次强力补刀（兼容单双引号）
-          find . -name "build.gradle" -exec sed -i "s/applicationId [\"'].*[\"']/applicationId \"com.antutu.ABenchMark\"/g" {} +
-          find . -name "namespace [\"'].*[\"']/namespace \"com.antutu.ABenchMark\"/g" {} +
+          # 第二轮：专门针对 build.gradle 里的关键字段（修复了语法错误）
+          find . -name "build.gradle" -type f -exec sed -i 's/applicationId .*/applicationId "com.antutu.ABenchMark"/g' {} +
+          find . -name "build.gradle" -type f -exec sed -i 's/namespace .*/namespace "com.antutu.ABenchMark"/g' {} +
           
-          # 针对 AndroidManifest.xml 强力覆盖
-          find . -name "AndroidManifest.xml" -exec sed -i 's/package="[^"]*"/package="com.antutu.ABenchMark"/g' {} +
+          # 第三轮：针对 AndroidManifest.xml 强行覆盖 package 属性
+          find . -name "AndroidManifest.xml" -type f -exec sed -i 's/package="[^"]*"/package="com.antutu.ABenchMark"/g' {} +
           
-          # 强制将签名改为 debug，确保即使没有秘钥也能安装
-          find . -name "build.gradle" -exec sed -i 's/signingConfig signingConfigs.release/signingConfig signingConfigs.debug/g' {} +
+          # 第四轮：强行改签名，确保能顺利打包
+          find . -name "build.gradle" -type f -exec sed -i 's/signingConfig signingConfigs.release/signingConfig signingConfigs.debug/g' {} +
           
-          echo "✅ 包名已进行地毯式强改！"
+          echo "✅ 语法错误已修复，包名强改完成！"
 
-      - name: 5. 正式打包 (强制开启伪装)
+      - name: 5. 暴力打包
         run: |
-          # 编译 release 版，专门针对 arm64 架构
+          # 绕过复杂的脚本，直接用 Flutter 官方命令打包
           flutter build apk --release --target-platform android-arm64 --no-tree-shake-icons
 
-      - name: 6. 上传安装包
+      - name: 6. 上传包
         uses: actions/upload-artifact@v4
         with:
           name: FLClash-AnTuTu-Spoof
